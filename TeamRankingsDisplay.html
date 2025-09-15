@@ -278,20 +278,43 @@
       }
     }
 
-    function parsePayload(payload){
-      let rows = [];
-      if (payload && Array.isArray(payload.rows)) rows = payload.rows;
-      else if (payload && Array.isArray(payload.data)) rows = payload.data;
-      else if (Array.isArray(payload)) rows = payload;
-      else if (payload && Array.isArray(payload.table)) rows = payload.table;
-      else rows = [];
-      rows = rows.map(r => (Array.isArray(r) ? r.map(trim) : []));
-      while (rows.length && rows[0].every(c => c === '')) rows.shift();
-      if (!rows.length) return { header:[], data:[] };
-      const headerGuess = rows[0] || [];
-      const hasHeaderKey = /名次|校友会|第一对选手|第二对选手|局分累|小分累/i.test(headerGuess.join(','));
-      return hasHeaderKey ? { header: headerGuess, data: rows.slice(1) } : { header:[], data: rows };
-    }
+ // FIX: 更稳健的表头识别，避免把“第一条数据”误判成表头
+function parsePayload(payload){
+  let rows = [];
+  if (payload && Array.isArray(payload.rows)) rows = payload.rows;
+  else if (payload && Array.isArray(payload.data)) rows = payload.data;
+  else if (Array.isArray(payload)) rows = payload;
+  else if (payload && Array.isArray(payload.table)) rows = payload.table;
+  else rows = [];
+
+  // 统一清洗
+  rows = rows.map(r => (Array.isArray(r) ? r.map(v => (v==null?'':String(v).trim())) : []));
+  while (rows.length && rows[0].every(c => c === '')) rows.shift();
+  if (!rows.length) return { header:[], data:[] };
+
+  const first = rows[0];
+
+  // 只在“单元格值等于以下标题之一”时计为命中（而不是包含子串）
+  const headerTokens = [
+    '名次','校友会','第一对选手','第二对选手','局分累计','小分累计',
+    'rank','school',"first player's id","first player's name",
+    "second player's id","second player's name",'sumr','total_score'
+  ].map(s=>s.toLowerCase());
+
+  const hits = first.reduce((n,cell)=>{
+    const s = String(cell||'').toLowerCase();
+    return n + (headerTokens.includes(s) ? 1 : 0);
+  }, 0);
+
+  // 若多数为数字，就不当表头
+  const numericCount = first.filter(c => /^-?\d+(\.\d+)?$/.test(c)).length;
+  const mostlyNumeric = numericCount >= Math.max(1, Math.floor(first.length * 0.6));
+
+  const treatAsHeader = (hits >= 2) && !mostlyNumeric;
+
+  return treatAsHeader ? { header:first, data: rows.slice(1) } : { header:[], data: rows };
+}  
+
 
     function buildColumnIndex(header){
       const lc = header.map(h => h.toLowerCase());
